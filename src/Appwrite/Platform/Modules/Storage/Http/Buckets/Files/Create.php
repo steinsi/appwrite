@@ -31,6 +31,7 @@ use Utopia\Database\Validator\Authorization\Input;
 use Utopia\Database\Validator\Permissions;
 use Utopia\Database\Validator\UID;
 use Utopia\Http\Adapter\Swoole\Request;
+use Utopia\Lock\Distributed;
 use Utopia\Lock\Exception\Contention as LockContention;
 use Utopia\Platform\Action;
 use Utopia\Platform\Scope\HTTP;
@@ -46,6 +47,12 @@ use Utopia\Validator\Nullable;
 class Create extends Action
 {
     use HTTP;
+
+    /**
+     * Lease for the per-file upload lock, in seconds. Refreshed before the
+     * transfer and before completion so a single chunk always gets the full window.
+     */
+    private const LOCK_TTL = 600;
 
     public static function getName()
     {
@@ -515,13 +522,19 @@ class Create extends Action
         try {
             // upload() can finalize and remove chunk files itself. Keep preparation,
             // transfer and document completion under the same per-file lock.
-            $locks($lockKey, 600, function () use ($prepareUpload, $finalizeUpload, &$completed, $queueForEvents, $deviceForFiles, $deviceForLocal, $fileTmpName, $path, $chunk, &$chunks, &$metadata): void {
+            $locks($lockKey, self::LOCK_TTL, function (Distributed $lock) use ($prepareUpload, $finalizeUpload, &$completed, $queueForEvents, $deviceForFiles, $deviceForLocal, $fileTmpName, $path, $chunk, &$chunks, &$metadata): void {
                 $prepareUpload();
 
                 if ($completed) {
                     $queueForEvents->reset();
 
                     return;
+                }
+
+                // Restart the lease so the transfer gets the full window,
+                // regardless of how long preparation took.
+                if (!$lock->refresh()) {
+                    throw new LockContention('Upload lease lost before transfer: ' . $lock->token());
                 }
 
                 $chunksUploaded = $deviceForFiles->upload(
@@ -532,6 +545,12 @@ class Create extends Action
                     $chunks,
                     $metadata
                 );
+
+                // Never record completion under a lapsed lease: another request
+                // may already own the file and be finalizing it.
+                if (!$lock->isHeld()) {
+                    throw new LockContention('Upload lease lost after transfer: ' . $lock->token());
+                }
 
                 $finalizeUpload($chunksUploaded);
             }, timeout: 120.0);
