@@ -25,7 +25,6 @@ abstract class Format
     protected array $keys;
     protected int $authCount;
     protected string $platform;
-    protected Availability $availability;
     protected array $params = [
         'name' => '',
         'description' => '',
@@ -42,7 +41,7 @@ abstract class Format
         'license.url' => '',
     ];
 
-    public function __construct(Container $container, array $services, array $routes, array $models, array $keys, int $authCount, string $platform, ?Availability $availability = null)
+    public function __construct(Container $container, array $services, array $routes, array $models, array $keys, int $authCount, string $platform)
     {
         $this->container = $container;
         $this->services = $services;
@@ -51,7 +50,6 @@ abstract class Format
         $this->keys = $keys;
         $this->authCount = $authCount;
         $this->platform = $platform;
-        $this->availability = $availability ?? new Availability();
     }
 
     /**

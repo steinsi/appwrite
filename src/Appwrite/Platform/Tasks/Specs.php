@@ -3,8 +3,8 @@
 namespace Appwrite\Platform\Tasks;
 
 use Appwrite\Network\Validator\Redirect;
+use Appwrite\SDK\AuthType;
 use Appwrite\SDK\Method;
-use Appwrite\SDK\Specification\Availability;
 use Appwrite\SDK\Specification\Format\OpenAPI3;
 use Appwrite\SDK\Specification\Specification;
 use Appwrite\Utopia\Request as AppwriteRequest;
@@ -28,7 +28,6 @@ use Utopia\System\System;
 use Utopia\Validator\Nullable;
 use Utopia\Validator\Text;
 use Utopia\Validator\WhiteList;
-use WeakMap;
 
 class Specs extends Action
 {
@@ -415,7 +414,15 @@ class Specs extends Action
 
     public function getSDKPlatformsForRouteSecurity(array $routeSecurity): array
     {
-        return (new Availability())->getAuthPlatforms($routeSecurity);
+        $platforms = [];
+        foreach ($routeSecurity as $auth) {
+            $platform = $auth instanceof AuthType ? $auth->getPlatform() : null;
+            if ($platform !== null) {
+                $platforms[] = $platform;
+            }
+        }
+
+        return $platforms;
     }
 
     public function action(string $version, string $mode, ?string $git, ?string $message, ?string $branch): void
@@ -465,18 +472,16 @@ class Specs extends Action
         }
 
         // Resolve full auth arrays through the active task (including subclass platforms).
-        $authPlatforms = new WeakMap();
         foreach ($appRoutes as $method) {
             foreach ($method as $route) {
                 $sdks = $route->getLabel('sdk', []);
                 foreach (\is_array($sdks) ? $sdks : [$sdks] as $sdk) {
                     if ($sdk instanceof Method) {
-                        $authPlatforms[$sdk] = $this->getSDKPlatformsForRouteSecurity($sdk->getAuth());
+                        $sdk->setPlatforms($this->getSDKPlatformsForRouteSecurity($sdk->getAuth()));
                     }
                 }
             }
         }
-        $availability = new Availability($authPlatforms, $mocks);
 
         foreach ($platforms as $platform) {
             $routes = [];
@@ -486,6 +491,10 @@ class Specs extends Action
 
             foreach ($appRoutes as $key => $method) {
                 foreach ($method as $route) {
+                    if (!$route->getLabel('docs', true) || (bool) $route->getLabel('mock', false) !== $mocks) {
+                        continue;
+                    }
+
                     $sdks = $route->getLabel('sdk', false);
 
                     if (empty($sdks)) {
@@ -497,7 +506,7 @@ class Specs extends Action
                     }
 
                     foreach ($sdks as $sdk) {
-                        if (!\in_array($platform, $availability->getPlatforms($route, $sdk), true)) {
+                        if (!\in_array($platform, $sdk->getPlatforms(), true)) {
                             continue;
                         }
 
@@ -577,7 +586,6 @@ class Specs extends Action
                 $keys[$platform],
                 $authCounts[$platform] ?? 0,
                 $platform,
-                $availability,
             ];
 
             foreach (['open-api3'] as $format) {

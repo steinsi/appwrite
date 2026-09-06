@@ -235,17 +235,21 @@ class OpenAPI3 extends Format
         $usedModels = [];
 
         foreach ($this->routes as $route) {
-            $sdkPlatforms = $this->availability->getPlatforms($route);
-            if (!\in_array($this->platform, $sdkPlatforms, true)) {
-                continue;
-            }
-
             $url = \str_replace('/v1', '', $route->getPath());
             $scope = $route->getLabel('scope', '');
 
             $sdk = $route->getLabel('sdk', false);
 
             if ($sdk === false) {
+                continue;
+            }
+
+            $sdkPlatforms = [];
+            foreach (\is_array($sdk) ? $sdk : [$sdk] as $method) {
+                $sdkPlatforms = \array_merge($sdkPlatforms, $method->getPlatforms());
+            }
+            $sdkPlatforms = \array_values(\array_unique($sdkPlatforms));
+            if (!\in_array($this->platform, $sdkPlatforms, true)) {
                 continue;
             }
 
@@ -302,7 +306,7 @@ class OpenAPI3 extends Format
                     /** @var Method $methodObj */
                     $desc = $methodObj->getDescriptionFilePath();
 
-                    $methodSdkPlatforms = $this->availability->getPlatforms($route, $methodObj);
+                    $methodSdkPlatforms = $methodObj->getPlatforms();
 
                     if (!\in_array($this->platform, $methodSdkPlatforms, true)) {
                         continue;
